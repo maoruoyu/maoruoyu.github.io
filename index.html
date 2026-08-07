@@ -3,25 +3,126 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>maoruoyu 的个人博客</title>
-<style>
-  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; max-width: 760px; margin: 0 auto; padding: 60px 20px; line-height: 1.7; color: #1f2328; background: #fdfdfd; }
-  h1 { font-size: 1.6em; }
-  .hello { color: #6b7280; }
-  ul.posts { list-style: none; padding: 0; }
-  ul.posts li { padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
-  ul.posts a { color: #2563eb; text-decoration: none; font-weight: 600; }
-  ul.posts a:hover { text-decoration: underline; }
-  .date { color: #9ca3af; font-size: .85em; margin-right: 10px; font-variant-numeric: tabular-nums; }
-</style>
+<title>maoruoyu · 排障手记</title>
+<meta name="description" content="maoruoyu 的技术手记：把每一次故障查到底。网络排障、工程实践与踩坑实录。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c8451f'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' fill='%23fff' text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="assets/style.css">
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("theme"); } catch (e) {}
+  if (t !== "dark" && t !== "light") {
+    t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
-<h1>maoruoyu 的个人博客</h1>
-<p class="hello">hello mrm Welcome!</p>
-<h2>文章</h2>
-<ul class="posts">
-  <li><span class="date">2026-08-08</span><a href="posts/2026-08-08-github-sni-fix.html">国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</a></li>
-  <li><span class="date">2026-08-08</span><a href="posts/2026-08-08-workbuddy-mtu-blackhole.html">WorkBuddy 网络故障排查记：从 TLS 误诊到 MTU 黑洞</a></li>
-</ul>
+
+<div class="progress" aria-hidden="true"><i></i></div>
+
+<header class="site-head">
+  <div class="container">
+    <a class="brand" href="index.html">
+      <span class="mark">m</span>
+      <span>maoruoyu · 排障手记</span>
+    </a>
+    <div class="head-actions">
+      <a class="icon-btn" href="https://github.com/maoruoyu" target="_blank" rel="noopener" title="GitHub" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="icon-btn" type="button" data-theme-toggle title="切换明暗主题" aria-label="切换明暗主题">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.55 1.55M17.85 17.85l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.55-1.55M17.85 6.15L19.4 4.6"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<section class="hero">
+  <div class="hero-grid" aria-hidden="true"></div>
+  <div class="container hero-inner">
+    <p class="kicker">Tech Journal · 排障手记</p>
+    <h1>把每一次故障，<br><em>查到底</em>。</h1>
+    <p class="lede">这里记录真实的网络排障与工程踩坑：从 TLS 误诊到 MTU 黑洞，从 DNS 污染到 SNI 投毒——每一篇都有完整的假设、实验与证据链。</p>
+    <div class="hero-meta">
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+        2 篇文章
+      </span>
+      <span>
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg>
+        网络排障专题
+      </span>
+      <span>
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        <a href="https://github.com/maoruoyu" target="_blank" rel="noopener">github.com/maoruoyu</a>
+      </span>
+    </div>
+  </div>
+</section>
+
+<main class="section">
+  <div class="container">
+    <div class="section-head">
+      <h2>文章</h2>
+      <span class="count">POSTS / 02</span>
+    </div>
+    <div class="post-list">
+
+      <a class="post-card reveal" href="posts/2026-08-08-github-sni-fix.html">
+        <div class="date"><b>08</b><small>AUG · 2026</small></div>
+        <div>
+          <h3>国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</h3>
+          <p>git clone / push 时灵时不灵？用 DoH 交叉解析、TCP/TLS 分层探测锁定 TLS SNI 关键词过滤，最终改走 SSH over 443 一次根治——没有 SNI，就没有伤害。</p>
+          <div class="chips">
+            <span class="chip">网络排障</span>
+            <span class="chip">GitHub</span>
+            <span class="chip">SNI</span>
+            <span class="chip">SSH</span>
+          </div>
+        </div>
+        <span class="go" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+      <a class="post-card reveal" href="posts/2026-08-08-workbuddy-mtu-blackhole.html">
+        <div class="date"><b>08</b><small>AUG · 2026</small></div>
+        <div>
+          <h3>WorkBuddy 网络故障排查记：从 TLS 误诊到 MTU 黑洞</h3>
+          <p>连接全部握手成功、请求却集体超时——187 次成功的 TLS 连接极具迷惑性。一个垃圾请求头二分逼近，锁定 IP 包 1478 字节断裂点，一条 netsh 命令收工。</p>
+          <div class="chips">
+            <span class="chip">网络排障</span>
+            <span class="chip">MTU</span>
+            <span class="chip">Electron</span>
+            <span class="chip">TLS</span>
+          </div>
+        </div>
+        <span class="go" aria-hidden="true">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </span>
+      </a>
+
+    </div>
+  </div>
+</main>
+
+<footer class="site-foot">
+  <div class="container">
+    <span>© <span data-year>2026</span> maoruoyu · hello mrm, welcome.</span>
+    <a href="https://pages.github.com" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18M12 2.8c2.6 2.5 4 5.7 4 9.2s-1.4 6.7-4 9.2c-2.6-2.5-4-5.7-4-9.2s1.4-6.7 4-9.2z"/></svg>
+      Powered by GitHub Pages
+    </a>
+  </div>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+</button>
+
+<script src="assets/blog.js"></script>
 </body>
 </html>

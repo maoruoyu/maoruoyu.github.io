@@ -3,78 +3,141 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</title>
-<style>
-  :root { color-scheme: light; }
-  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 20px 80px; line-height: 1.75; color: #1f2328; background: #fdfdfd; }
-  h1 { font-size: 1.7em; line-height: 1.4; border-bottom: 2px solid #e5e7eb; padding-bottom: .4em; }
-  h2 { font-size: 1.3em; margin-top: 2em; border-left: 4px solid #2563eb; padding-left: 10px; }
-  .meta { color: #6b7280; font-size: .9em; margin-bottom: 2em; }
-  code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; font-family: Consolas, "Courier New", monospace; font-size: .9em; color: #b91c1c; }
-  pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
-  pre code { background: none; color: inherit; padding: 0; }
-  table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: .95em; }
-  th, td { border: 1px solid #d1d5db; padding: 6px 12px; text-align: left; }
-  th { background: #f3f4f6; }
-  blockquote { border-left: 4px solid #f59e0b; background: #fffbeb; margin: 1em 0; padding: 8px 16px; color: #78350f; border-radius: 0 6px 6px 0; }
-  .ok { color: #16a34a; font-weight: 600; }
-  .bad { color: #dc2626; font-weight: 600; }
-  a { color: #2563eb; }
-  .back { margin-bottom: 1.5em; display: inline-block; }
-</style>
+<title>国内直连 GitHub 的正确姿势：一次 SNI 投毒排查 · maoruoyu</title>
+<meta name="description" content="git clone / push 时灵时不灵？DoH 交叉解析 + TCP/TLS 分层探测，锁定 TLS SNI 关键词过滤，改走 SSH over 443 一次根治。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c8451f'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' fill='%23fff' text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/style.css">
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("theme"); } catch (e) {}
+  if (t !== "dark" && t !== "light") {
+    t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
 </head>
 <body>
-<a class="back" href="../index.html">&larr; 返回首页</a>
-<h1>国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</h1>
-<div class="meta">2026-08-08 · 网络排障 · GitHub / SNI / SSH</div>
 
-<p>上一篇<a href="2026-08-08-workbuddy-mtu-blackhole.html">《WorkBuddy 网络故障排查记》</a>解决的是 MTU 黑洞；这一篇记录另一个独立的问题：<strong>git clone / push 频繁失败</strong>，时灵时不灵。两者都是网络层故障，但机制完全不同，诊断手法也值得对照。</p>
+<div class="progress" aria-hidden="true"><i></i></div>
 
-<h2>一、故障矩阵</h2>
-<p>先把现象按目标主机拆开，规律立刻浮现：</p>
-<table>
-  <tr><th>目标</th><th>现象</th></tr>
-  <tr><td><code>git clone/push</code>（github.com HTTPS）</td><td><span class="bad">间歇性失败</span>：21s 连接超时 / <code>SSL_ERROR_SYSCALL</code> / connection reset，重试几次又能成</td></tr>
-  <tr><td><code>gh</code> CLI（api.github.com）</td><td><span class="ok">基本稳定</span></td></tr>
-  <tr><td>GitHub Pages（*.github.io）</td><td><span class="bad">0.1 秒内被连接重置</span>，几乎必挂</td></tr>
-  <tr><td><code>raw.githubusercontent.com</code></td><td><span class="bad">超时</span></td></tr>
-</table>
-<p>「同一台机器、同一时间，不同 GitHub 域名命运迥异」——这说明不是本机问题，而是针对特定目标的干扰。</p>
+<header class="site-head">
+  <div class="container">
+    <a class="brand" href="../index.html">
+      <span class="mark">m</span>
+      <span>maoruoyu · 排障手记</span>
+    </a>
+    <div class="head-actions">
+      <a class="icon-btn" href="https://github.com/maoruoyu" target="_blank" rel="noopener" title="GitHub" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="icon-btn" type="button" data-theme-toggle title="切换明暗主题" aria-label="切换明暗主题">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.55 1.55M17.85 17.85l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.55-1.55M17.85 6.15L19.4 4.6"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
 
-<h2>二、逐层排查</h2>
-<h3>1. DNS 有没有被污染？</h3>
-<p>用阿里 DoH（<code>https://223.5.5.5/resolve</code>）与本机 DNS 交叉比对：<code>github.com</code>、<code>api.github.com</code>、<code>raw.githubusercontent.com</code> 返回的都是 GitHub 真实 IP 段（<code>20.205.x</code> / <code>140.82.x</code> / <code>185.199.x</code>），<strong>DNS 是干净的</strong>。</p>
+<article>
+  <div class="post-hero">
+    <div class="container">
+      <a class="crumb" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        返回首页
+      </a>
+      <div class="chips">
+        <span class="chip">网络排障</span>
+        <span class="chip">GitHub</span>
+        <span class="chip">SNI</span>
+        <span class="chip">SSH</span>
+      </div>
+      <h1 class="post-title">国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</h1>
+      <div class="post-meta">
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>
+          2026-08-08
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg>
+          约 8 分钟
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/></svg>
+          排障实录 · 第二弹
+        </span>
+      </div>
+    </div>
+  </div>
 
-<h3>2. IP 可达性批量探测</h3>
-<p>对所有候选 IP 做 TCP 443 探测，结果是「分裂」的：</p>
-<pre><code>20.205.243.166  TIMEOUT   ← github.com DNS 唯一返回的 IP，恰好被封
+  <div class="post-body">
+    <div class="container">
+
+      <p class="lead">上一篇<a href="2026-08-08-workbuddy-mtu-blackhole.html">《WorkBuddy 网络故障排查记》</a>解决的是 MTU 黑洞；这一篇记录另一个独立的问题：<strong>git clone / push 频繁失败</strong>，时灵时不灵。两者都是网络层故障，但机制完全不同，诊断手法也值得对照。</p>
+
+      <h2>一、故障矩阵</h2>
+      <p>先把现象按目标主机拆开，规律立刻浮现：</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>目标</th><th>现象</th></tr>
+          </thead>
+          <tbody>
+            <tr><td><code>git clone/push</code>（github.com HTTPS）</td><td><span class="bad">间歇性失败</span>：21s 连接超时 / <code>SSL_ERROR_SYSCALL</code> / connection reset，重试几次又能成</td></tr>
+            <tr><td><code>gh</code> CLI（api.github.com）</td><td><span class="ok">基本稳定</span></td></tr>
+            <tr><td>GitHub Pages（*.github.io）</td><td><span class="bad">0.1 秒内被连接重置</span>，几乎必挂</td></tr>
+            <tr><td><code>raw.githubusercontent.com</code></td><td><span class="bad">超时</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>「同一台机器、同一时间，不同 GitHub 域名命运迥异」——这说明不是本机问题，而是针对特定目标的干扰。</p>
+
+      <h2>二、逐层排查</h2>
+      <h3>1. DNS 有没有被污染？</h3>
+      <p>用阿里 DoH（<code>https://223.5.5.5/resolve</code>）与本机 DNS 交叉比对：<code>github.com</code>、<code>api.github.com</code>、<code>raw.githubusercontent.com</code> 返回的都是 GitHub 真实 IP 段（<code>20.205.x</code> / <code>140.82.x</code> / <code>185.199.x</code>），<strong>DNS 是干净的</strong>。</p>
+
+      <h3>2. IP 可达性批量探测</h3>
+      <p>对所有候选 IP 做 TCP 443 探测，结果是「分裂」的：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>probe · tcp-443</span></div>
+        <pre><code>20.205.243.166  TIMEOUT   ← github.com DNS 唯一返回的 IP，恰好被封
 20.205.243.165  TCP_OK    ← 同一网段隔壁的 IP 却是通的
 140.82.112.3    TCP_OK 274ms
 140.82.113.4    TCP_OK 1278ms
 192.30.255.116  TIMEOUT   ← 老 IP 段已全灭</code></pre>
-<p>DNS 只给了一个 IP，而这个 IP 恰好被墙 —— 这就是「时通不通」的表层原因之一。</p>
+      </div>
+      <p>DNS 只给了一个 IP，而这个 IP 恰好被墙 —— 这就是「时通不通」的表层原因之一。</p>
 
-<h3>3. TCP 通 ≠ 能用</h3>
-<p>对 TCP 可达的 IP 做真实 TLS 握手测试，更诡异的一幕出现了：</p>
-<pre><code>--- round 1 ---
+      <h3>3. TCP 通 ≠ 能用</h3>
+      <p>对 TCP 可达的 IP 做真实 TLS 握手测试，更诡异的一幕出现了：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>probe · tls-handshake</span></div>
+        <pre><code>--- round 1 ---
 140.82.112.3  github.com  TLS_OK 1122ms   ← 能握手！
 140.82.114.4  github.com  TLS_OK 548ms
 --- round 2 ---
 140.82.112.3  github.com  TIMEOUT          ← 同样的 IP，全灭
 140.82.114.4  github.com  TIMEOUT
 --- round 3 --- 依旧全灭</code></pre>
-<p>TCP 三次握手能过、TLS ClientHello 一发出去就被丢/重置，而且<strong>成功过一次之后会进入一段「投毒窗口」</strong>，后续连接全部失败 —— 这是典型的 <strong>TLS SNI 关键词过滤</strong>：审查设备读取 ClientHello 里的域名（SNI），命中规则就注入 RST 或丢包。</p>
-<p>验证：强制 TLS 1.2 重试（排除版本指纹因素）—— 照样被重置。<strong>干扰与 TLS 版本无关，只认域名。</strong></p>
+      </div>
+      <p>TCP 三次握手能过、TLS ClientHello 一发出去就被丢/重置，而且<strong>成功过一次之后会进入一段「投毒窗口」</strong>，后续连接全部失败 —— 这是典型的 <strong>TLS SNI 关键词过滤</strong>：审查设备读取 ClientHello 里的域名（SNI），命中规则就注入 RST 或丢包。</p>
+      <p>验证：强制 TLS 1.2 重试（排除版本指纹因素）—— 照样被重置。<strong>干扰与 TLS 版本无关，只认域名。</strong></p>
 
-<h3>4. 找一条不被过滤的通道</h3>
-<p>继续探测两个特殊目标：</p>
-<pre><code>140.82.121.5  api.github.com   TLS_OK ×3 轮全通过   ← API 域名不在过滤名单
+      <h3>4. 找一条不被过滤的通道</h3>
+      <p>继续探测两个特殊目标：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>probe · api &amp; ssh</span></div>
+        <pre><code>140.82.121.5  api.github.com   TLS_OK ×3 轮全通过   ← API 域名不在过滤名单
 20.205.243.160:443  →  "SSH-2.0-7f27de7" ×3 轮全通过 ← SSH 通道畅通！</code></pre>
-<p><code>ssh.github.com:443</code> 是 GitHub 官方支持的「SSH over HTTPS 端口」入口。SSH 握手没有 TLS ClientHello、没有 SNI 指纹，因此完全不触发过滤。</p>
+      </div>
+      <p><code>ssh.github.com:443</code> 是 GitHub 官方支持的「SSH over HTTPS 端口」入口。SSH 握手没有 TLS ClientHello、没有 SNI 指纹，因此完全不触发过滤。</p>
 
-<h2>三、最终方案</h2>
-<p><strong>git 操作全部改走 SSH over 443</strong>，三步完成：</p>
-<pre><code># 1. 生成密钥（我放在 D 盘，不占 C 盘）
+      <h2>三、最终方案</h2>
+      <p><strong>git 操作全部改走 SSH over 443</strong>，三步完成：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>shell · ssh-over-443</span></div>
+        <pre><code># 1. 生成密钥（我放在 D 盘，不占 C 盘）
 ssh-keygen -t ed25519 -f "D:/Study/qoder/ssh/id_ed25519_github"
 
 # 2. 上传公钥（或网页 Settings → SSH keys）
@@ -84,20 +147,58 @@ gh ssh-key add "D:/Study/qoder/ssh/id_ed25519_github.pub"
 git config --global core.sshCommand \
   "ssh -i D:/Study/qoder/ssh/id_ed25519_github -o IdentitiesOnly=yes"
 git remote set-url origin "ssh://git@ssh.github.com:443/用户名/仓库名.git"</code></pre>
-<p>改完后 <code>git ls-remote</code> / <code>push</code> 一次通过，不再需要重试循环。<code>gh</code> CLI 走的 api.github.com 本就稳定，再往 hosts 里固定一条实测可达的 IP 防止 DNS 抽风即可。</p>
+      </div>
+      <p>改完后 <code>git ls-remote</code> / <code>push</code> 一次通过，不再需要重试循环。<code>gh</code> CLI 走的 api.github.com 本就稳定，再往 hosts 里固定一条实测可达的 IP 防止 DNS 抽风即可。</p>
 
-<h2>四、解决不了的部分</h2>
-<p>诚实记录：<strong>github.com 网页和 GitHub Pages 的 HTTPS 访问依然被 SNI 投毒</strong>，hosts 改 IP 无效（过滤认域名不认 IP）。这部分要彻底解决只能上代理类工具（Watt Toolkit、dev-sidecar 之类），或换个网络环境访问。git 工作流不受影响，对我来说已经够用。</p>
+      <h2>四、解决不了的部分</h2>
+      <div class="callout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 16.6v.01M10.3 3.9 1.9 18.1a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        <p>诚实记录：<strong>github.com 网页和 GitHub Pages 的 HTTPS 访问依然被 SNI 投毒</strong>，hosts 改 IP 无效（过滤认域名不认 IP）。这部分要彻底解决只能上代理类工具（Watt Toolkit、dev-sidecar 之类），或换个网络环境访问。git 工作流不受影响，对我来说已经够用。</p>
+      </div>
 
-<h2>五、经验</h2>
-<ul>
-  <li><strong>按目标主机拆分现象</strong>是第一招：同机不同域名命运不同，立刻指向「针对性干扰」而非本机故障；</li>
-  <li><strong>TCP 通 ≠ TLS 通 ≠ HTTP 通</strong>，三层要分别测；「握手成功一次后连续失败」是 SNI 投毒窗口期的指纹；</li>
-  <li>强制 TLS 1.2 对照实验可以快速排除「版本指纹」假设；</li>
-  <li>GitHub 官方留了 <code>ssh.github.com:443</code> 后门，是国内直连做 git 操作最稳的免费方案 —— 没有 SNI，就没有伤害；</li>
-  <li>与上篇 MTU 黑洞对照：那是「大包被丢、小包能过」，认包大小；这是「特定域名被重置」，认 SNI。同一条线路上可以同时存在多种互不相干的故障，诊断时不要先入为主。</li>
-</ul>
+      <h2>五、经验</h2>
+      <ul>
+        <li><strong>按目标主机拆分现象</strong>是第一招：同机不同域名命运不同，立刻指向「针对性干扰」而非本机故障；</li>
+        <li><strong>TCP 通 ≠ TLS 通 ≠ HTTP 通</strong>，三层要分别测；「握手成功一次后连续失败」是 SNI 投毒窗口期的指纹；</li>
+        <li>强制 TLS 1.2 对照实验可以快速排除「版本指纹」假设；</li>
+        <li>GitHub 官方留了 <code>ssh.github.com:443</code> 后门，是国内直连做 git 操作最稳的免费方案 —— 没有 SNI，就没有伤害；</li>
+        <li>与上篇 MTU 黑洞对照：那是「大包被丢、小包能过」，认包大小；这是「特定域名被重置」，认 SNI。同一条线路上可以同时存在多种互不相干的故障，诊断时不要先入为主。</li>
+      </ul>
 
-<p style="color:#6b7280;margin-top:3em;font-size:.9em">—— 探测脚本见文末思路：DoH 交叉解析 + TCP/TLS 批量探测 + SSH banner 探测，每个环节都是几十行 Node.js。</p>
+    </div>
+  </div>
+
+  <div class="post-foot">
+    <div class="container">
+      <nav class="post-nav">
+        <a class="prev" href="2026-08-08-workbuddy-mtu-blackhole.html">
+          <small>Prev · 上一篇</small>
+          <b>WorkBuddy 网络故障排查记：从 TLS 误诊到 MTU 黑洞</b>
+        </a>
+        <a class="next" href="../index.html">
+          <small>Index · 返回首页</small>
+          <b>全部文章</b>
+        </a>
+      </nav>
+      <p class="colophon">—— 探测脚本见文末思路：DoH 交叉解析 + TCP/TLS 批量探测 + SSH banner 探测，每个环节都是几十行 Node.js。</p>
+    </div>
+  </div>
+</article>
+
+<footer class="site-foot">
+  <div class="container">
+    <span>© <span data-year>2026</span> maoruoyu · hello mrm, welcome.</span>
+    <a href="https://pages.github.com" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18M12 2.8c2.6 2.5 4 5.7 4 9.2s-1.4 6.7-4 9.2c-2.6-2.5-4-5.7-4-9.2s1.4-6.7 4-9.2z"/></svg>
+      Powered by GitHub Pages
+    </a>
+  </div>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+</button>
+
+<script src="../assets/blog.js"></script>
 </body>
 </html>
