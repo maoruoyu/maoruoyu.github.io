@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>WorkBuddy 网络故障排查记：从 TLS 误诊到 MTU 黑洞</title>
+<style>
+  :root { color-scheme: light; }
+  body { font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif; max-width: 860px; margin: 0 auto; padding: 40px 20px 80px; line-height: 1.75; color: #1f2328; background: #fdfdfd; }
+  h1 { font-size: 1.7em; line-height: 1.4; border-bottom: 2px solid #e5e7eb; padding-bottom: .4em; }
+  h2 { font-size: 1.3em; margin-top: 2em; border-left: 4px solid #2563eb; padding-left: 10px; }
+  h3 { font-size: 1.1em; margin-top: 1.6em; }
+  .meta { color: #6b7280; font-size: .9em; margin-bottom: 2em; }
+  code { background: #f3f4f6; padding: 2px 5px; border-radius: 4px; font-family: Consolas, "Courier New", monospace; font-size: .9em; color: #b91c1c; }
+  pre { background: #0f172a; color: #e2e8f0; padding: 14px 16px; border-radius: 8px; overflow-x: auto; line-height: 1.5; }
+  pre code { background: none; color: inherit; padding: 0; }
+  table { border-collapse: collapse; margin: 1em 0; width: 100%; font-size: .95em; }
+  th, td { border: 1px solid #d1d5db; padding: 6px 12px; text-align: left; }
+  th { background: #f3f4f6; }
+  blockquote { border-left: 4px solid #f59e0b; background: #fffbeb; margin: 1em 0; padding: 8px 16px; color: #78350f; border-radius: 0 6px 6px 0; }
+  .ok { color: #16a34a; font-weight: 600; }
+  .bad { color: #dc2626; font-weight: 600; }
+  a { color: #2563eb; }
+  .back { margin-bottom: 1.5em; display: inline-block; }
+</style>
+</head>
+<body>
+<a class="back" href="../index.html">&larr; 返回首页</a>
+<h1>WorkBuddy 网络故障排查记：从 TLS 误诊到 MTU 黑洞</h1>
+<div class="meta">2026-08-08 · 网络排障 · Electron / Node.js / TLS / MTU</div>
+
+<h2>一、故障现象</h2>
+<p>腾讯 WorkBuddy 桌面端（Electron 应用）突然全面网络错误：登录态接口报 <code>Error 3002 网络连接失败</code>、<code>502 socket hang up</code>，日志里全是这样的记录：</p>
+<pre><code>[DomainHttp] GET /portal/msg-center/message/summary FAIL,
+    The operation was aborted due to timeout, code=23
+msgCenter:getSummary OK 10035.1ms   ← 每次都精确撞在 10 秒超时上</code></pre>
+<p>奇怪的是：同一个进程里，访问 <code>api.skillhub.cn</code> 的接口全部正常（100~180ms 返回 200），<strong>只有访问 <code>copilot.tencent.com</code> 的请求全军覆没</strong>。</p>
+
+<h2>二、第一次误诊：TLS 1.3</h2>
+<p>最初的观察是：用 Node.js 直接请求 <code>copilot.tencent.com</code> 会挂死，而 curl 却能自动恢复。Node 的 TLS 栈不会像 curl 那样自动做版本回退，于是我把矛头对准了 TLS 1.3 —— 怀疑网络设备对 TLS 1.3 的 ClientHello 有干扰。</p>
+<p>我甚至为此写了一套 Electron <code>app.asar</code> 外科手术补丁工具：在入口脚本里注入 monkeypatch，把全局 <code>tls.connect</code> 强制限制为 <code>maxVersion: "TLSv1.2"</code>，重新计算 asar 内每个文件的偏移量和 SHA256 完整性校验，逐字节验证 18000+ 个文件无误后替换安装。</p>
+<p>效果：<strong>一部分请求确实恢复了</strong>。但核心业务接口（消息中心、技能市场、权益查询）依旧 10 秒超时。诊断方向对了一半，但没打中要害。</p>
+
+<h2>三、给程序装上眼睛：更深的疑云</h2>
+<p>我给补丁加了连接级埋点：记录进程内每一次 <code>net.connect</code> / <code>tls.connect</code> 的目标、耗时与结果。重启应用后得到了一个反直觉的画面：</p>
+<ul>
+  <li>daemon 进程对 <code>copilot.tencent.com:443</code> 发起了 <strong>187 次 TLS 连接，全部握手成功</strong>，耗时 22~73ms；</li>
+  <li>但 HTTP 请求层全部超时，且超时时刻没有任何新的连接尝试；</li>
+  <li>独立环境里用同版本 Node 复刻同样的请求 —— 请求也挂死！</li>
+</ul>
+<p>第 3 条是分水岭：<strong>故障跟着请求走，不跟应用走</strong>。问题不在 Electron 内部，而在「这个网络 + 这类请求」的组合上。</p>
+
+<h2>四、决定性实验：请求头填充</h2>
+<p>接下来的排除法快速收敛：</p>
+<table>
+  <tr><th>实验</th><th>结果</th></tr>
+  <tr><td>无 token 请求（头很小）</td><td><span class="ok">94ms 返回 401</span></td></tr>
+  <tr><td>真实 Bearer token（头约 1.6KB）</td><td><span class="bad">15 秒后 empty reply</span></td></tr>
+  <tr><td>假 token + 同样大的头</td><td><span class="bad">15 秒后 empty reply</span></td></tr>
+  <tr><td>curl 带真实 token</td><td><span class="bad">同样 15 秒挂死</span></td></tr>
+</table>
+<p>假 token 也挂 → 不是账号问题；curl 也挂 → 不是客户端指纹问题。<strong>变量只剩下「请求的大小」</strong>。于是做了最关键的填充实验 —— 不带 token，只加一个越来越大的垃圾请求头：</p>
+<pre><code>for n in 100 400 700 1000 1200 1250 1280 1290 1295 1300:
+    curl -H "X-Pad: $(printf 'x%.0s' ...)" \
+         https://copilot.tencent.com/portal/msg-center/message/summary</code></pre>
+<p>结果干净利落：</p>
+<table>
+  <tr><th>填充大小</th><th>结果</th></tr>
+  <tr><td>≤ 1290 字节</td><td><span class="ok">~110ms 返回 401</span></td></tr>
+  <tr><td>≥ 1295 字节</td><td><span class="bad">15 秒空挂后被对端关闭</span></td></tr>
+</table>
+<p>断裂点极其锐利，就卡在 5 个字节之间。再测对照主机：<code>api.skillhub.cn</code> 带 1400 字节填充头照样 200 正常。<strong>黑洞只存在于去往 copilot.tencent.com（腾讯 EdgeOne CDN）的路由上，且只与包大小有关。</strong></p>
+
+<h2>五、真相：路径 MTU 黑洞</h2>
+<p>把填充大小换算成 IP 包尺寸（HTTP 头 + TLS 记录头 + TCP/IP 头），断裂点正好落在 <strong>IP 包 ≈ 1478 字节</strong>附近 —— 典型的路径 MTU 黑洞：</p>
+<blockquote>
+去往 EdgeOne 的路径上存在某个 MTU 约 1476~1480 的环节（很可能是某段 GRE/隧道封装），超过这个尺寸的包被静默丢弃，且<strong>不返回 ICMP Fragmentation Needed</strong>，PMTUD 失效，发送方永远不知道自己该把包变小。
+</blockquote>
+<p>回头看，所有现象都被统一解释了：</p>
+<ul>
+  <li><strong>TLS 1.3 握手失败</strong>：TLS 1.3 的 ClientHello 携带大量扩展，经常超过阈值被丢弃；TLS 1.2 的 ClientHello 小，能过 —— 所以当初「限制 TLS 1.2」的补丁看似有效，其实只是把包变小了；</li>
+  <li><strong>带 token 的请求全挂</strong>：1291 字节的 JWT 加进请求头后，首个数据报文恰好超过阈值；</li>
+  <li><strong>小包请求（401）秒回</strong>：包小，安然通过；</li>
+  <li><strong>TCP 握手永远成功</strong>：SYN 包很小 —— 所以连接埋点显示 187 次连接全部成功，极具迷惑性。</li>
+</ul>
+
+<h2>六、修复与验证</h2>
+<p>修复只有一条命令（管理员权限）：</p>
+<pre><code>netsh interface ipv4 set subinterface "WLAN" mtu=1450 store=persistent</code></pre>
+<p>把网卡 MTU 从 1500 降到 1450，让所有出向包都低于黑洞阈值，并保留 20+ 字节余量。<code>store=persistent</code> 保证重启后依然生效。</p>
+<p>随后把之前给 WorkBuddy 打的 asar 补丁<strong>全部还原为官方原版</strong>，重启应用，日志显示：</p>
+<ul>
+  <li>网络层错误：<strong>0 条</strong>（此前每次启动 300+ 条）；</li>
+  <li><code>copilot.tencent.com</code> 请求：<strong>全部 HTTP 200</strong>；</li>
+  <li>消息中心接口延迟：从固定 10000ms 超时降到 <strong>138~754ms</strong>；</li>
+  <li>TLS 1.3 也恢复正常 —— 进一步印证当初的「TLS 干扰」只是 MTU 问题的表象。</li>
+</ul>
+<p>修复在网络层完成，应用保持官方原版，后续 WorkBuddy 自动升级不受任何影响。</p>
+
+<h2>七、经验总结</h2>
+<ul>
+  <li><strong>「连接成功但请求超时」时，先怀疑包尺寸</strong>。TCP/TLS 握手成功只能证明小包能过，不代表数据信道健康；</li>
+  <li><strong>请求头填充是定位 MTU 黑洞的通用技巧</strong>：<code>curl -H "X-Pad: xxx..."</code> 二分逼近阈值，几分钟就能锁定断裂点；</li>
+  <li><strong>先在独立环境复刻，再动应用</strong>。「故障是否跟着请求走」是划分应用 bug 与网络问题的分水岭，能避免在错误的层面（比如我一开始的 asar 补丁）做大量无用功；</li>
+  <li><strong>警惕「部分修复」</strong>。TLS 1.2 补丁让一部分请求恢复，差点让诊断止步于此 —— 部分有效往往意味着只命中了表象；</li>
+  <li>MTU 黑洞偏爱隧道/封装链路（GRE、PPPoE、VPN），断裂点锐利（几字节之差）是它的指纹；与之相对，随机丢包通常是另一类问题。</li>
+</ul>
+
+<h2>附：快速复现与修复命令</h2>
+<pre><code># 1. 填充实验（二分测阈值）
+curl -sS -o NUL -w "%{http_code} %{time_total}s\n" \
+     -H "X-Pad: $(head -c 1295 &lt; /dev/zero | tr '\0' x)" \
+     --max-time 17 https://copilot.tencent.com/
+
+# 2. 对照：同一填充打其他主机（正常则说明黑洞是路由特异性的）
+
+# 3. 修复（Windows，管理员）
+netsh interface ipv4 set subinterface "WLAN" mtu=1450 store=persistent
+netsh interface ipv4 show subinterfaces   # 验证</code></pre>
+
+<p style="color:#6b7280;margin-top:3em;font-size:.9em">—— 记于一次折腾了两天、改错两次方向的排障之后。</p>
+</body>
+</html>
