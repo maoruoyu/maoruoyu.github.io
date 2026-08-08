@@ -1,0 +1,242 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>消失的工具调用：Codex 会话「中断」悬疑排查 · maoruoyu</title>
+<meta name="description" content="Codex 总在准备执行下一步时戛然而止。四层日志交叉取证 + 三轮受控复现，证明链路无罪：真凶是沙箱权限墙与模型自己的「只说不做」。">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%23c8451f'/%3E%3Ctext x='32' y='45' font-family='Georgia,serif' font-size='40' font-weight='700' fill='%23fff' text-anchor='middle'%3Em%3C/text%3E%3C/svg%3E">
+<link rel="stylesheet" href="../assets/style.css">
+<script>
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("theme"); } catch (e) {}
+  if (t !== "dark" && t !== "light") {
+    t = window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+  }
+  document.documentElement.setAttribute("data-theme", t);
+})();
+</script>
+</head>
+<body>
+
+<div class="progress" aria-hidden="true"><i></i></div>
+
+<header class="site-head">
+  <div class="container">
+    <a class="brand" href="../index.html">
+      <span class="mark">m</span>
+      <span>maoruoyu · 排障手记</span>
+    </a>
+    <div class="head-actions">
+      <a class="icon-btn" href="https://github.com/maoruoyu" target="_blank" rel="noopener" title="GitHub" aria-label="GitHub">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27s1.36.09 2 .27c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.01 8.01 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+      </a>
+      <button class="icon-btn" type="button" data-theme-toggle title="切换明暗主题" aria-label="切换明暗主题">
+        <svg class="moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+        <svg class="sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4.2"/><path d="M12 2.5v2.2M12 19.3v2.2M4.6 4.6l1.55 1.55M17.85 17.85l1.55 1.55M2.5 12h2.2M19.3 12h2.2M4.6 19.4l1.55-1.55M17.85 6.15L19.4 4.6"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<article>
+  <div class="post-hero">
+    <div class="container">
+      <a class="crumb" href="../index.html">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M19 12H5M11 18l-6-6 6-6"/></svg>
+        返回首页
+      </a>
+      <div class="chips">
+        <span class="chip">AI 工程</span>
+        <span class="chip">Codex CLI</span>
+        <span class="chip">日志取证</span>
+        <span class="chip">沙箱</span>
+      </div>
+      <h1 class="post-title">消失的工具调用：Codex 会话「中断」悬疑排查</h1>
+      <div class="post-meta">
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4.5" width="18" height="17" rx="2.5"/><path d="M3 9.5h18M8 2.5v4M16 2.5v4"/></svg>
+          2026-08-08
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.2 2"/></svg>
+          约 11 分钟
+        </span>
+        <span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1"/></svg>
+          排障实录 · 第三弹
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <div class="post-body">
+    <div class="container">
+
+      <p class="lead">前两篇排查的都是网络层；这一篇换口味——<strong>AI 智能体自己的「灵异事件」</strong>。Codex CLI 在跑长任务时反复出现同一种怪象：每次它说完「接下来我要做 X」、正准备执行下一步动作时，会话就戛然而止。没有报错、没有超时提示，就像被人拔了线。这次不靠猜，用四层日志交叉取证加三轮受控复现，把嫌疑一个个排除。</p>
+
+      <h2>一、链路结构与故障现象</h2>
+      <p>先交代这条请求链路，后面的证据都挂在上面：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>chain · overview</span></div>
+        <pre><code>Codex CLI 0.147 (Responses API, wire_api=responses, store=false)
+    ↓  http://127.0.0.1:15721/v1
+cc-switch 3.19 本地代理（Responses → chat/completions 转换、重试×6、熔断）
+    ↓  https
+海外中继站（转发到模型服务）</code></pre>
+      </div>
+      <p>用户视角的现象极其稳定：<strong>「每次在你准备进行下一步动作时就会停止」</strong>。而且专挑长会话下手，短对话没事。</p>
+
+      <h2>二、两种完全不同的「中断」</h2>
+      <p>把 cc-switch 日志按时间轴铺开，第一类问题立刻现形——但注意时间窗：<strong>全部集中在 17:00 之前</strong>：</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>时间</th><th>事件</th><th>性质</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>16:35:09</td><td>上游 HTTP 504 Gateway Time-out（FWD-003）</td><td><span class="bad">硬失败</span></td></tr>
+            <tr><td>16:55–16:58</td><td>连续 503「服务繁忙」风暴，codex 方向 31 条 FWD-003</td><td><span class="bad">硬失败</span></td></tr>
+            <tr><td>17:55 之后</td><td>FWD-003 归零，但「中断」仍在继续</td><td><span class="ok">网络无罪</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <p>503/504 是中继站过载，cc-switch 有 6 次重试加熔断器兜底，属于「疼但能自愈」。真正折磨人的是 17:00 之后的第二类：<strong>日志里一片祥和的静默中断</strong>。</p>
+
+      <h2>三、取证：四处日志现场</h2>
+      <h3>1. 客户端错误日志——全是烟雾弹</h3>
+      <p>Codex 自己的日志数据库里有 60 条 ERROR，时间戳与中断时刻完全吻合。逐条抓出来一看：<strong>全部是 PowerShell 工具执行失败</strong>（沙箱权限拒绝、引号解析错误），没有一条流断开记录。中断在客户端侧是<strong>静默</strong>发生的。</p>
+
+      <h3>2. 会话回放——抓到现行</h3>
+      <p>解析 rollout 会话文件（.jsonl）里最后一个 turn 的 SSE 事件，拿到了关键帧：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>rollout · response.completed</span></div>
+        <pre><code>status: completed            ← 正常完成，不是截断
+incomplete_details: null     ← 没有撞输出上限
+output items: [reasoning, message]   ← 只有推理和一段话，没有 function_call
+usage: input=121142  cached=118784   ← 上下文已膨胀到 12 万 token
+推理段尾部: "Let me query the sqlite database…"   ← 明明白白写着要动手
+实际输出: 一段「接下来我要查询……」的叙述，然后 turn 结束</code></pre>
+      </div>
+      <p>模型<strong>想</strong>执行工具调用（推理里都写好了），但响应里只有叙述、没有动作。HTTP 200、状态 completed、usage 正常——从协议角度看，这是一次「成功」的请求。</p>
+
+      <h2>四、受控复现：给链路做无罪推定</h2>
+      <p>「工具调用在传输中丢失」是最大嫌疑。设计三轮受控实验，每轮只留一个变量：</p>
+      <div class="tablewrap">
+        <table>
+          <thead>
+            <tr><th>实验</th><th>条件</th><th>结果</th></tr>
+          </thead>
+          <tbody>
+            <tr><td>A · 直连中继 vs 经代理</td><td>小上下文 + tools 数组，两条链路对照</td><td><span class="ok">finish=tool_calls，双双正常</span></td></tr>
+            <tr><td>B · 推理档位</td><td>xhigh 最高推理档重测</td><td><span class="ok">工具调用完整返回</span></td></tr>
+            <tr><td>C · 超大上下文</td><td>构造 128,400 token 输入（超过故障会话的 121k），原样走代理 /responses</td><td><span class="ok">11.8 秒返回 [reasoning, function_call]，零丢失</span></td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>repro · big-context result</span></div>
+        <pre><code>HTTP 200  first byte 10974ms
+output item types: ["reasoning","function_call"]
+status: completed   incomplete_details: undefined
+usage: {"input_tokens":128400,"output_tokens":57}
+TOOL_CALL_PRESENT name=shell args={"command":["ls","-la"]}</code></pre>
+      </div>
+      <p>三轮全绿。<strong>转换层、中继、模型在 12 万 token 级别都能正确投递工具调用。</strong>链路无罪，剩下的嫌疑人只有两个：沙箱和模型自己。</p>
+
+      <h2>五、真凶落网</h2>
+      <h3>真凶之一：沙箱权限墙</h3>
+      <p>回放里那些「PowerShell ERROR」不是烟雾弹，是<strong>案发现场</strong>：Codex 的 workspace-write 沙箱只放行工作区目录（在 C 盘），而我的规则是所有产出必须落 D 盘。于是每一次写文件尝试都撞上 <code>UnauthorizedAccessException</code>，模型被权限墙反复弹回，最终学会了「描述动作但不执行」——turn 就此终结。</p>
+
+      <h3>真凶之二：叙述惯性</h3>
+      <p>一旦前几个 turn 以「只说不做」收尾，长会话的上下文就把这个模式固化成惯性：推理里计划得好好的，输出却只剩旁白。这也解释了为什么<strong>短会话从不复发</strong>——没有累积的坏样本。</p>
+
+      <h2>六、修复清单</h2>
+      <p>四个改动全部落在 <code>~/.codex/config.toml</code>：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>config.toml · diff</span></div>
+        <pre><code># 1. 沙箱放行 D 盘工作区（拆掉权限墙）
+[sandbox_workspace_write]
+network_access = true
+writable_roots = ["D:\\Docs\\qoder", "D:\\workspace"]
+
+# 2. 行动纪律指令（打断叙述惯性）
+instructions = """
+ACTION DISCIPLINE (critical):
+- Never end a turn by merely announcing what you are about to do.
+  If you state an intended action, you MUST issue the corresponding
+  tool call in the SAME turn.
+- When blocked by a permission/sandbox error, do not stop: report the
+  exact blocker, then immediately try an alternative path.
+...
+"""
+
+# 3. 上下文卫生（12 万 token 的教训）
+model_auto_compact_token_limit = 160000
+
+# 4. 删除失效旧键 disable_response_storage
+#    新版对非 Azure 端点已无条件 store=false（client.rs 实锤），
+#    留着只会让 --strict-config 报错</code></pre>
+      </div>
+      <p>顺带挖出一个彩蛋：官方文档链接已全部改指新站且拒绝抓取，于是直接反查 298MB 的原生二进制字符串表加 <code>gh api</code> 拉源码，确认了每个配置键的真实拼写——<strong>文档会过期，二进制不会说谎</strong>。</p>
+
+      <h2>七、验证与一个意外的发现</h2>
+      <p>修复后用 <code>codex exec --strict-config</code> 跑真实任务：创建文件到 D 盘 → 读回比对，一次通过（此前必撞权限墙）：</p>
+      <div class="codewin">
+        <div class="codewin-bar"><i></i><i></i><i></i><span>verify · codex exec</span></div>
+        <pre><code>Step 1 done: created D:\Docs\qoder\codex-tools\verify-out\sandbox-write-test.txt
+Step 2 read content: [CODEX_SANDBOX_FIX_OK_20260808]
+VERIFY: PASS - content identical</code></pre>
+      </div>
+      <div class="callout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 16.6v.01M10.3 3.9 1.9 18.1a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
+        <p>排查收尾时还撞上一桩案中案：工作目录 <code>D:\Study</code> 整个「失踪」了，追查发现它在故障会话活跃的时间点被改名成了 <code>D:\Docs</code>，现场还留着那个会话创建的 <code>codex_diag_test</code> 目录。被排查的对象顺手 rearrange 了排查者的硬盘——这大概就是为什么它的每次「准备下一步」都显得那么意味深长。</p>
+      </div>
+
+      <h2>八、经验</h2>
+      <ul>
+        <li><strong>「静默中断」先查响应体再查网络</strong>：<code>response.completed</code> 里 <code>status=completed</code> 却没有 <code>function_call</code>，说明请求成功了，是内容层面的问题，别在超时重试上浪费精力；</li>
+        <li><strong>受控复现是终审</strong>：小上下文、推理档位、超大上下文三轮对照全绿，才能给链路判无罪，把矛头对准真正的行为层原因；</li>
+        <li><strong>权限墙会驯化模型</strong>：反复的 <code>UnauthorizedAccessException</code> 不只是报错，它会把「只叙述不执行」写进上下文惯性——沙箱白名单要和用户的文件规则对齐；</li>
+        <li>长会话记得开自动 compact（<code>model_auto_compact_token_limit</code>），上下文窗口大不代表质量不衰减；</li>
+        <li>配置键拿不准时，<code>--strict-config</code> 是最快的校验器；官方文档抓不到就查二进制字符串表和源码，两条路都比猜快。</li>
+      </ul>
+
+    </div>
+  </div>
+
+  <div class="post-foot">
+    <div class="container">
+      <nav class="post-nav">
+        <a class="prev" href="2026-08-08-github-sni-fix.html">
+          <small>Prev · 上一篇</small>
+          <b>国内直连 GitHub 的正确姿势：一次 SNI 投毒排查</b>
+        </a>
+        <a class="next" href="../index.html">
+          <small>Index · 返回首页</small>
+          <b>全部文章</b>
+        </a>
+      </nav>
+      <p class="colophon">—— 分析脚本存于 D 盘 codex-tools：rollout 事件回放、SSE 对照、128k 上下文复现器，均为几十行 Node.js。</p>
+    </div>
+  </div>
+</article>
+
+<footer class="site-foot">
+  <div class="container">
+    <span>© <span data-year>2026</span> maoruoyu · hello mrm, welcome.</span>
+    <a href="https://pages.github.com" target="_blank" rel="noopener">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9.2"/><path d="M3 12h18M12 2.8c2.6 2.5 4 5.7 4 9.2s-1.4 6.7-4 9.2c-2.6-2.5-4-5.7-4-9.2s1.4-6.7 4-9.2z"/></svg>
+      Powered by GitHub Pages
+    </a>
+  </div>
+</footer>
+
+<button class="to-top" type="button" aria-label="回到顶部">
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 19V5M6 11l6-6 6 6"/></svg>
+</button>
+
+<script src="../assets/blog.js"></script>
+</body>
+</html>
