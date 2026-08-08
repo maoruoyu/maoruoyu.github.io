@@ -191,7 +191,7 @@ VERIFY: PASS - content identical</code></pre>
       </div>
       <div class="callout">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 9v4M12 16.6v.01M10.3 3.9 1.9 18.1a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/></svg>
-        <p>排查收尾时还撞上一桩案中案：工作目录 <code>D:\Study</code> 整个「失踪」了，追查发现它在故障会话活跃的时间点被改名成了 <code>D:\Docs</code>，现场还留着那个会话创建的 <code>codex_diag_test</code> 目录。被排查的对象顺手 rearrange 了排查者的硬盘——这大概就是为什么它的每次「准备下一步」都显得那么意味深长。</p>
+        <p>排查收尾时还撞上一桩案中案：工作目录 <code>D:\Study</code> 整个「失踪」，追查发现它早在前一天深夜就已被改名成 <code>D:\Docs</code>。更精彩的是，故障会话的 rollout 里留着它 18:19 的内心独白——「沙箱可写根是 C:\Users\28169……先试试，不行就提权」——提权成功后在 <code>D:\Docs</code> 里留下了一个空的 <code>codex_diag_test</code> 目录。撞墙、绕路、留痕，正是上文诊断的行为模式的完整切片。</p>
       </div>
 
       <h2>八、经验</h2>
